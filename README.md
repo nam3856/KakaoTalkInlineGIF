@@ -1,0 +1,66 @@
+# KakaoTalkInlineGIF
+
+Windows PC 카카오톡의 GIF를 클릭하지 않고 대화창 안에서 재생하는 보조 프로그램입니다. 대화창에 포커스가 있을 때 재생하고, 다른 창으로 이동하면 현재 프레임에서 멈췄다가 돌아오면 이어서 재생합니다.
+
+카카오톡의 공식 기능이나 공식 배포 프로그램이 아닙니다.
+
+## 지원 환경
+
+- Windows x64, .NET Framework 4.x
+- PC 카카오톡 **26.9.2.5342 / 32비트**
+- 지원하는 실행 파일의 SHA-256: `ec0f43b67cc7e81544464f649a5dfbd690776968014d34d7c554b7a9382a2290`
+
+카카오톡 업데이트로 실행 파일이 달라지면 적용을 중단합니다. 버전 번호만 같아도 해시가 다르면 실행하지 않습니다. 빠르게 스크롤할 때 GIF 위치를 따라가는 데 약간의 지연이 있을 수 있습니다. 원본을 내려받을 수 없는 GIF는 재생하지 못할 수 있습니다.
+
+## 설치와 사용
+
+1. Releases에서 `KakaoTalkInlineGIF-버전-win-x64.zip`을 받아 압축을 풉니다.
+2. `Install-KakaoTalkInlineGif.cmd`를 실행합니다. 관리자 권한은 필요하지 않습니다.
+3. 카카오톡 대화창을 열면 표시된 GIF를 자동으로 준비합니다. 원본 다운로드가 필요한 경우 잠시 걸릴 수 있습니다.
+
+설치 위치는 `%LOCALAPPDATA%\KakaoTalkInlineGif`입니다. Node.js와 Frida가 함께 들어 있어 별도로 설치할 필요가 없습니다. 기본 설치는 Windows 로그인 자동 시작을 등록합니다. 기존 시작 프로그램 값은 유지하고 이 프로그램의 값만 추가합니다.
+
+알림 영역 아이콘을 오른쪽 클릭하면 **인라인 GIF 사용**을 끄거나 **종료**할 수 있습니다. 자동 시작까지 끄려면 설치 폴더의 `Disable-KakaoTalkInlineGif.cmd`를 실행하세요. 다시 자동 시작하려면 설치 프로그램을 다시 실행합니다.
+
+PowerShell에서 `-CheckOnly`로 설치 계획만 확인하거나 `-NoStart`, `-NoStartup`을 사용할 수 있습니다.
+
+```powershell
+.\Install-KakaoTalkInlineGif.ps1 -CheckOnly
+.\Install-KakaoTalkInlineGif.ps1 -NoStartup
+```
+
+## 동작 방식
+
+Frida로 실행 중인 지원 버전 카카오톡에 연결해 이미지 위젯과 원본 이미지 컨테이너를 확인합니다. 원본이 없으면 카카오톡 자체 이미지 조회·다운로드 경로를 사용합니다. 복사한 GIF는 별도 C# 렌더러가 클릭을 가로채지 않는 창으로 말풍선 위치에 표시합니다. 렌더러가 대화창 포커스, 위치와 클리핑을 확인하고 프레임을 진행합니다.
+
+카카오톡 실행 파일을 디스크에서 수정하지 않습니다. 대화 데이터베이스를 직접 열거나 복호화하지 않으며, 대화 텍스트를 수집하지 않습니다. GIF 원본 다운로드는 카카오톡이 처리합니다. 도우미 자체의 분석 서버나 업로드 기능은 없습니다.
+
+GIF는 설치 폴더의 `cache`에, 실행 상태와 진단 정보는 `runtime`에 로컬로 저장합니다. 캐시에는 실제 이미지가 들어 있고, 로그에는 내부 식별자가 포함될 수 있습니다. 이 폴더를 GitHub 이슈에 그대로 첨부하지 마세요. `Get-KakaoTalkInlineGifValidation.ps1`은 원본 로그·미디어·대화 식별자를 포함하지 않는 상태 보고서를 만듭니다.
+
+## 소스에서 빌드
+
+Windows x64와 .NET Framework C# 컴파일러가 필요합니다. 루트 `build.ps1`은 출력물을 `artifacts` 아래에만 만듭니다.
+
+```powershell
+# C# 프로그램과 배포 구조만 빌드
+.\build.ps1
+
+# 공식 Node.js와 잠금 파일의 Frida 의존성을 포함한 ZIP 생성
+.\build.ps1 -BundleRuntime -Zip
+
+# 격리된 합성 테스트 실행: 카카오톡 연결이나 실제 시작 프로그램 변경 없음
+.\test.ps1 -NodeExecutable '경로\node.exe'
+```
+
+런타임 빌드는 공식 Node.js 24.22.2 바이너리와 체크섬을 고정하고 Frida 17.23.2를 사용합니다. 이미 준비된 공식 런타임을 사용하려면 `-NodeExecutable`과 `-DependencyRoot`를 지정할 수 있습니다. 의존성을 받아오는 과정에는 네트워크가 필요합니다. 의존성 다운로드나 바인딩 로딩에 실패하면 빌드를 중단합니다.
+
+| 경로 | 내용 |
+| --- | --- |
+| `src/agent` | Frida 에이전트, 원본 GIF 조회와 수명 관리 |
+| `src/host` | 프로세스 연결, 캐시, 렌더러 전달 |
+| `src/renderer` | GIF 디코딩·포커스·오버레이 렌더링 |
+| `src/launcher` | 트레이, 설정, 전용 호스트 프로세스 관리 |
+| `scripts` | 사용자 전용 설치·해제와 시작 프로그램 회귀 테스트 |
+| `tests` | 합성 GIF·소유권·ABI 테스트 |
+
+소스는 MIT 라이선스이며 번들 의존성의 라이선스는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 따릅니다.

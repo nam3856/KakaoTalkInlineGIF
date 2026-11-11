@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Local inline GIF renderer manifest, physical screen pixels",
+  "type": "object",
+  "required": ["schemaVersion"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "ownerHwnd": {"type": "string", "description": "Top-level chat HWND as decimal string or 0x-prefixed hexadecimal string. Per-item override is supported."},
+    "ownerProcessId": {"type": "integer", "minimum": 0, "description": "Expected owner PID; strongly recommended to reject stale/recycled handles."},
+    "enabled": {"type": "boolean", "default": true},
+    "shutdown": {"type": "boolean", "default": false},
+    "items": {
+      "type": "array", "maxItems": 16,
+      "items": {
+        "type": "object", "required": ["id", "source", "imageRect", "clipRect"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1, "maxLength": 200},
+          "source": {"type": "string", "pattern": "^[A-Za-z]:[\\\\/]", "description": "Absolute local GIF file. URLs, UNC paths, and drive-relative paths are rejected. Parent supplies extracted original bytes; renderer performs no network access."},
+          "ownerHwnd": {"type": "string"},
+          "ownerProcessId": {"type": "integer", "minimum": 0},
+          "backgroundArgb": {"type": "string", "pattern": "^#?([A-Fa-f0-9]{6}|[A-Fa-f0-9]{8})$", "description": "Optional backing color. Supply the correct opaque #AARRGGBB canvas color for transparent GIFs to cover the original static thumbnail; omitted uses transparency."},
+          "imageRect": {"$ref": "#/$defs/rect"},
+          "clipRect": {"$ref": "#/$defs/rect"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "rect": {
+      "type": "object", "required": ["x", "y", "width", "height"],
+      "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}, "width": {"type": "integer", "minimum": 1, "maximum": 16384}, "height": {"type": "integer", "minimum": 1, "maximum": 16384}}
+    }
+  }
+}
