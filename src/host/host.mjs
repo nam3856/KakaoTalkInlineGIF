@@ -17,6 +17,20 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
 let writeSequence=0;
 const atomic=async(file,value)=>{const temporary=file+'.'+process.pid+'.'+(++writeSequence)+'.tmp';await writeFile(temporary,JSON.stringify(value));try{for(let attempt=0;;attempt++){try{await rename(temporary,file);break;}catch(error){if(!['EPERM','EACCES','EBUSY'].includes(error.code)||attempt>=12)throw error;await wait(15+attempt*10);}}}finally{try{await unlink(temporary);}catch{}}};
 let stop=false,enabled=true,session=null,script=null,appPid=null,lastState=null,disconnected=false,initialized=false;
+let startupAttemptPid=null,startupAttempts=0;
+function createRuntimeReadyGate(expectedPid,onReady,timeoutMs=5000){
+  let settled=false,resolveReady,rejectReady;
+  const promise=new Promise((resolve,reject)=>{resolveReady=resolve;rejectReady=reject;});
+  const fail=error=>{if(settled)return;settled=true;clearTimeout(timer);rejectReady(error);};
+  const timer=setTimeout(()=>{const error=new Error('Kakao runtime startup did not report readiness in time');error.code='INLINEGIF_STARTUP_TIMEOUT';fail(error);},timeoutMs);
+  return{promise,fail,cancel(){fail(new Error('Kakao runtime startup wait cancelled'));},observe(message){
+    if(settled)return;
+    if(message.type==='error'){const error=new Error('Kakao runtime startup failed: '+String(message.description||'Unknown agent error'));error.code='INLINEGIF_AGENT_STARTUP';fail(error);return;}
+    const event=message.payload;if(event?.kind!=='runtime-ready')return;
+    if(event.ready!==true||event.pid!==expectedPid){const error=new Error('Invalid Kakao runtime readiness identity');error.code='INLINEGIF_STARTUP_HANDSHAKE';fail(error);return;}
+    settled=true;clearTimeout(timer);onReady(event);resolveReady(event);
+  }};
+}
 let assets={};try{assets=JSON.parse(await readFile(indexPath,'utf8')).assets||{};}catch{}
 const renderers=new Map(),pendingWrites=new Set();let cacheQueue=Promise.resolve();
 const statePath=path.join(runtimeDir,'host-state.json');
@@ -79,8 +93,8 @@ async function cleanup(){
       await script.exports.dispose();
     }catch(error){log('cleanup-error',{error:error.message});throw error;}
   }
-  if(script&&!disconnected)await script.unload();
-  if(session&&!disconnected)await session.detach();
+  try{if(script&&!disconnected)await script.unload();}
+  finally{if(session&&!disconnected)await session.detach();}
   await Promise.allSettled(Array.from(pendingWrites));
   for(const entry of renderers.values()){if(entry.child.exitCode===null){await wait(150);if(entry.child.exitCode===null)entry.child.kill();}}
   renderers.clear();script=null;session=null;appPid=null;lastState=null;disconnected=false;initialized=false;
@@ -92,14 +106,31 @@ try{
       const device=await frida.getLocalDevice();const processes=await device.enumerateProcesses();const app=processes.find(p=>p.name.toLowerCase()==='kakaotalk.exe');
       if(!app){await atomic(statePath,{state:'waiting-for-kakaotalk',enabled});await wait(1500);continue;}
       if(sha(await readFile(targetPath))!==supportedHash){await atomic(statePath,{state:'unsupported-version',enabled});await wait(5000);continue;}
+      if(startupAttemptPid!==app.pid){startupAttemptPid=app.pid;startupAttempts=0;}startupAttempts++;
+      try{
       appPid=app.pid;disconnected=false;session=await frida.attach(appPid);
       session.detached.connect(()=>{disconnected=true;});
       const config={pid:appPid,testTitle:process.env.INLINEGIF_TEST_TITLE??'',setImageGuard:'558bec6aff68bd0e1d0264a100000000'};
       const files=['memory.js','native-abi.js','source-resolver.js','runtime.js'];
       const source='globalThis.INLINE_GIF_CONFIG='+JSON.stringify(config)+';\n'+(await Promise.all(files.map(f=>readFile(path.join(agentDir,f),'utf8')))).join('\n');
-      script=await session.createScript(source);script.message.connect(onMessage);await script.load();initialized=true;
+      script=await session.createScript(source);
+      const startup=createRuntimeReadyGate(appPid,()=>{initialized=true;});
+      script.message.connect((message,data)=>{startup.observe(message);onMessage(message,data);});
+      try{await Promise.all([Promise.resolve().then(()=>script.load()),startup.promise]);}finally{startup.cancel();}
       await script.exports.setKnownAssets(Object.keys(assets));
-      const startupResult=await script.exports.initialize();initialized=true;await atomic(path.join(runtimeDir,'startup.json'),startupResult);log('attached',{pid:appPid,...startupResult});
+      const startupResult=await script.exports.initialize();await atomic(path.join(runtimeDir,'startup.json'),startupResult);log('attached',{pid:appPid,...startupResult});
+      startupAttempts=0;
+      }catch(error){
+        if(!initialized&&error.code==='INLINEGIF_AGENT_STARTUP'&&error.message.includes('Unsupported runtime bytes')&&startupAttempts<6){
+          const failedPid=appPid;await cleanup();
+          log('startup-retry',{pid:failedPid,attempt:startupAttempts,maxAttempts:6,delayMs:5000,error:error.message});
+          await atomic(statePath,{state:'waiting-for-runtime',pid:failedPid,enabled,attempt:startupAttempts,maxAttempts:6});
+          const retryAt=Date.now()+5000;
+          while(!stop&&Date.now()<retryAt){await readControl();if(!stop)await wait(Math.min(250,Math.max(0,retryAt-Date.now())));}
+          continue;
+        }
+        throw error;
+      }
     }
     if(disconnected){await cleanup();await wait(1000);continue;}
     await script.exports.setEnabled(enabled);

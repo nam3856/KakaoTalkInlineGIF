@@ -1,6 +1,6 @@
 {
   "name": "kakaotalk-inline-gif",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Focus-gated inline GIF playback helper for a pinned Windows KakaoTalk build",
   "type": "module",

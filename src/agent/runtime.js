@@ -44,7 +44,7 @@ function applyPaintGeometry(item,w){
   w.clipRect=intersection(w.clipRect,{x:origin.x+geometry.clip.x,y:origin.y+geometry.clip.y,width:geometry.clip.width,height:geometry.clip.height});return true;
 }
 function bytesHex(address,count){return Array.from(new Uint8Array(address.readByteArray(count)),b=>b.toString(16).padStart(2,'0')).join('');}
-function guard(address,hex){if(bytesHex(address,hex.length/2)!==hex)throw new Error('Unsupported runtime bytes at '+address);}
+function guard(address,hex){const actual=bytesHex(address,hex.length/2);if(actual!==hex)throw new Error('Unsupported runtime bytes at '+address+' expected='+hex+' actual='+actual);}
 function uriData(thumbnail){
   const data=thumbnail.add(0x50).readPointer(),length=data.sub(8).readU32();if(length<1||length>8192)throw new Error('Invalid media key');
   return new Uint8Array(data.readByteArray(length));
