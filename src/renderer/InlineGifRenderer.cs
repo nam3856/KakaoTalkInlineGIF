@@ -207,7 +207,8 @@ namespace InlineGifRenderer
 
     internal static class Native
     {
-        internal const int GWL_EXSTYLE = -20, GWLP_HWNDPARENT = -8, GW_OWNER = 4, GA_ROOT = 2;
+        internal const int GWL_EXSTYLE = -20, GWLP_HWNDPARENT = -8, GW_OWNER = 4, GA_ROOT = 2, GW_HWNDNEXT = 2, GW_HWNDPREV = 3;
+        internal const int WS_EX_TOPMOST = 0x8;
         internal const int WS_EX_LAYERED = 0x80000, WS_EX_TRANSPARENT = 0x20, WS_EX_NOACTIVATE = 0x08000000, WS_EX_TOOLWINDOW = 0x80;
         internal const int SW_HIDE = 0, SW_SHOWNOACTIVATE = 4;
         [StructLayout(LayoutKind.Sequential)] internal struct POINT { public int X, Y; public POINT(int x, int y) { X = x; Y = y; } }
@@ -252,12 +253,78 @@ namespace InlineGifRenderer
             return IntPtr.Size == 8 ? GetWindowLong64(window, GWL_EXSTYLE).ToInt64() : (uint)GetWindowLong32(window, GWL_EXSTYLE);
         }
         internal static IntPtr Root(IntPtr window) { return window == IntPtr.Zero ? IntPtr.Zero : GetAncestor(window, GA_ROOT); }
+        internal enum OwnerOrder { Unknown, Above, Below }
+        internal static OwnerOrder OrderRelativeToOwner(IntPtr window, IntPtr owner)
+        {
+            if (window == IntPtr.Zero || owner == IntPtr.Zero || window == owner || !IsWindow(window) || !IsWindow(owner))
+                return OwnerOrder.Unknown;
+            // The usual case is an immediately adjacent owned popup. Bound both
+            // traversals because other processes may change the chain meanwhile.
+            for (int pass = 0; pass < 2; pass++)
+            {
+                int direction = pass == 0 ? GW_HWNDNEXT : GW_HWNDPREV;
+                IntPtr current = window;
+                for (int count = 0; count < 1024; count++)
+                {
+                    current = GetWindow(current, direction);
+                    if (current == owner) return direction == GW_HWNDNEXT ? OwnerOrder.Above : OwnerOrder.Below;
+                    if (current == IntPtr.Zero || current == window) break;
+                }
+            }
+            return OwnerOrder.Unknown;
+        }
+        internal static bool RepairOwnedZOrder(IntPtr window, IntPtr owner, bool ownerFocused)
+        {
+            return RepairOwnedZOrder(window, owner, ownerFocused, delegate { return Root(GetForegroundWindow()); });
+        }
+        // The foreground reader is injected only by the isolated hidden-window
+        // regression test; the production overload always reads the real focus.
+        internal static bool RepairOwnedZOrder(IntPtr window, IntPtr owner, bool ownerFocused, Func<IntPtr> foregroundRoot)
+        {
+            if (!ownerFocused || foregroundRoot == null || foregroundRoot() != owner
+                || !IsWindow(window) || !IsWindow(owner) || GetWindow(window, GW_OWNER) != owner
+                || ((ExtendedStyle(window) | ExtendedStyle(owner)) & WS_EX_TOPMOST) != 0
+                || OrderRelativeToOwner(window, owner) != OwnerOrder.Below) return false;
+            IntPtr previous = GetWindow(owner, GW_HWNDPREV);
+            if (previous == window || (previous != IntPtr.Zero && !IsWindow(previous))) return false;
+            // Insert after the preceding normal window, immediately ABOVE the
+            // owner. Inserting after the owner itself would put us behind it.
+            // A topmost predecessor must not promote this popup to TOPMOST.
+            if (previous != IntPtr.Zero && (ExtendedStyle(previous) & WS_EX_TOPMOST) != 0) previous = IntPtr.Zero; // HWND_TOP
+            // Recheck focus and ownership immediately before the mutating call.
+            if (foregroundRoot() != owner || GetWindow(window, GW_OWNER) != owner
+                || ((ExtendedStyle(window) | ExtendedStyle(owner)) & WS_EX_TOPMOST) != 0) return false;
+            // A preceding popup may have moved, closed or become topmost while
+            // focus was checked. Reacquire it rather than using the stale handle.
+            previous = GetWindow(owner, GW_HWNDPREV);
+            if (previous == window || previous == owner || (previous != IntPtr.Zero && !IsWindow(previous))) return false;
+            if (previous != IntPtr.Zero && (ExtendedStyle(previous) & WS_EX_TOPMOST) != 0) previous = IntPtr.Zero;
+            // NOOWNERZORDER, NOACTIVATE, SHOWWINDOW, NOMOVE, NOSIZE; no NOZORDER.
+            if (!SetWindowPos(window, previous, 0, 0, 0, 0, 0x0253))
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            RequireNonTopmostOverlay(window);
+            return true;
+        }
+        private static void RequireNonTopmostOverlay(IntPtr window)
+        {
+            if ((ExtendedStyle(window) & WS_EX_TOPMOST) == 0) return;
+            // Fail closed if an external z-order race promoted this popup. Hide
+            // before demoting only this window, without showing/activating it or
+            // moving its owner. Every show path checks again, including retries.
+            ShowWindow(window, SW_HIDE);
+            bool demoted = SetWindowPos(window, new IntPtr(-2), 0, 0, 0, 0, 0x0213); // HWND_NOTOPMOST, no SHOWWINDOW
+            if (!demoted || (ExtendedStyle(window) & WS_EX_TOPMOST) != 0)
+                throw new InvalidOperationException("Unexpected topmost overlay remains hidden.");
+            throw new InvalidOperationException("Unexpected topmost overlay was hidden and reset.");
+        }
         internal static void ShowPreservingZOrder(IntPtr window)
         {
+            RequireNonTopmostOverlay(window);
             // NOZORDER, NOOWNERZORDER, NOACTIVATE, SHOWWINDOW, NOMOVE, NOSIZE.
             // Never use HWND_TOP/TOPMOST or move the owner group on blur/restore.
             if (!SetWindowPos(window, IntPtr.Zero, 0, 0, 0, 0, 0x0257))
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            RequireNonTopmostOverlay(window);
         }
         internal static IntPtr ParseHandle(string value)
         {
@@ -285,10 +352,12 @@ namespace InlineGifRenderer
     internal sealed class LayeredOverlay : Form
     {
         private readonly IntPtr window;
+        private readonly IntPtr owner;
         internal IntPtr NativeHandle { get { return window; } }
         internal bool OverlayShown { get; private set; }
         internal LayeredOverlay(IntPtr owner)
         {
+            this.owner = owner;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
@@ -323,7 +392,13 @@ namespace InlineGifRenderer
             if (Native.IsWindow(window)) Native.ShowWindow(window, Native.SW_HIDE);
             OverlayShown = false;
         }
-        internal void PaintBitmap(Bitmap bitmap, Rectangle visible, bool show)
+        internal bool RepairOrder(bool ownerFocused)
+        {
+            bool repaired = Native.RepairOwnedZOrder(window, owner, ownerFocused);
+            if (repaired) OverlayShown = true;
+            return repaired;
+        }
+        internal void PaintBitmap(Bitmap bitmap, Rectangle visible, bool show, bool ownerFocused = false)
         {
             if (!Native.IsWindow(window)) throw new InvalidOperationException("Overlay window was destroyed.");
             IntPtr screen = Native.GetDC(IntPtr.Zero), memory = IntPtr.Zero, hBitmap = IntPtr.Zero, previous = IntPtr.Zero;
@@ -338,7 +413,11 @@ namespace InlineGifRenderer
                 Native.BLENDFUNCTION blend = new Native.BLENDFUNCTION { BlendOp = 0, BlendFlags = 0, SourceConstantAlpha = 255, AlphaFormat = 1 };
                 if (!Native.UpdateLayeredWindow(window, screen, ref destination, ref size, memory, ref source, 0, ref blend, 2))
                     throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-                if (show) { Native.ShowPreservingZOrder(window); OverlayShown = true; }
+                if (show)
+                {
+                    if (!RepairOrder(ownerFocused)) Native.ShowPreservingZOrder(window);
+                    OverlayShown = true;
+                }
             }
             finally
             {
@@ -443,12 +522,13 @@ namespace InlineGifRenderer
             bool redraw = changed || GeometryDirty || visible != LastVisible || !Overlay.OverlayShown;
             if (redraw)
             {
-                using (Bitmap frame = Gif.Render(FocusClock.Clock.FrameIndex, ImageRect, visible, Background)) Overlay.PaintBitmap(frame, visible, true);
+                using (Bitmap frame = Gif.Render(FocusClock.Clock.FrameIndex, ImageRect, visible, Background)) Overlay.PaintBitmap(frame, visible, true, play);
                 FramesRendered++;
                 LastRenderedFrame = FocusClock.Clock.FrameIndex;
                 LastVisible = visible;
                 GeometryDirty = false;
             }
+            else if (play) Overlay.RepairOrder(true); // Resume order even during a long retained frame delay.
             return true;
         }
         internal void Hide() { if (Overlay != null) Overlay.HideOverlay(); }
@@ -588,6 +668,10 @@ namespace InlineGifRenderer
                         framesRendered = item.FramesRendered, renderedFrameIndex = item.LastRenderedFrame,
                         playing = item.FocusClock.Playing, visible = item.Overlay != null && item.Overlay.OverlayShown,
                         frozen = item.Overlay != null && item.Overlay.OverlayShown && !item.FocusClock.Playing,
+                        overlayNativeVisible = item.Overlay != null && Native.IsWindowVisible(item.Overlay.NativeHandle),
+                        overlayOwnerMatches = item.Overlay != null && Native.GetWindow(item.Overlay.NativeHandle, Native.GW_OWNER) == item.Owner,
+                        overlayTopmost = item.Overlay != null && (Native.ExtendedStyle(item.Overlay.NativeHandle) & Native.WS_EX_TOPMOST) != 0,
+                        overlayZOrder = item.Overlay == null ? "absent" : Native.OrderRelativeToOwner(item.Overlay.NativeHandle, item.Owner).ToString().ToLowerInvariant(),
                         backgroundArgb = "#" + unchecked((uint)item.Background.ToArgb()).ToString("X8"), error = item.LastError });
                 }
                 string text = json.Serialize(new { schemaVersion = 1, processId = Process.GetCurrentProcess().Id, utc = DateTime.UtcNow.ToString("o"),

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
@@ -11,6 +12,8 @@ namespace InlineGifRenderer
 {
     internal static class SelfTests
     {
+        [DllImport("user32.dll", EntryPoint = "SetWindowPos", SetLastError = true)]
+        private static extern bool PositionSyntheticWindow(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
         private static void Check(bool condition, string message)
         {
             if (!condition) throw new InvalidOperationException(message);
@@ -163,6 +166,98 @@ namespace InlineGifRenderer
                         Check(Native.GetWindow(overlay.NativeHandle, 3) == previousWindow && Native.GetWindow(overlay.NativeHandle, 2) == nextWindow,
                             "Updating a frozen/hidden bitmap changed the window z-order.");
                         Check(Native.GetForegroundWindow() == before, "Painting hidden overlay stole focus.");
+                    }
+                }
+            });
+            test("owned-overlay-scroll-recreation-order-repair-and-blur-guard", delegate
+            {
+                IntPtr before = Native.GetForegroundWindow();
+                using (Form owner = new Form())
+                using (Form wrongOwner = new Form())
+                {
+                    IntPtr ownerHandle = owner.Handle, wrongOwnerHandle = wrongOwner.Handle;
+                    using (LayeredOverlay overlay = new LayeredOverlay(ownerHandle))
+                    using (GifSource gif = new GifSource(fixture))
+                    using (Bitmap frame = gif.Render(0, new Rectangle(-32000, -32000, 2, 1), new Rectangle(-32000, -32000, 2, 1)))
+                    {
+                        // Keep the test surface entirely outside the desktop. No
+                        // owner is shown or activated; only focus policy is injected.
+                        overlay.PaintBitmap(frame, new Rectangle(-32000, -32000, 2, 1), false);
+                        Check(PositionSyntheticWindow(overlay.NativeHandle, ownerHandle, 0, 0, 0, 0, 0x0213), "Could not reproduce a popup below its owner.");
+                        Check(Native.OrderRelativeToOwner(overlay.NativeHandle, ownerHandle) == Native.OwnerOrder.Below,
+                            "Synthetic fixture did not reproduce the reported below-owner order.");
+                        IntPtr previous = Native.GetWindow(overlay.NativeHandle, Native.GW_HWNDPREV), next = Native.GetWindow(overlay.NativeHandle, Native.GW_HWNDNEXT);
+                        int foregroundReads = 0;
+                        Check(!Native.RepairOwnedZOrder(overlay.NativeHandle, ownerHandle, false, delegate { foregroundReads++; return ownerHandle; }),
+                            "Blurred overlay repaired order.");
+                        Check(foregroundReads == 0 && Native.GetWindow(overlay.NativeHandle, Native.GW_HWNDPREV) == previous
+                            && Native.GetWindow(overlay.NativeHandle, Native.GW_HWNDNEXT) == next, "Blur changed popup ordering.");
+                        Check(!Native.RepairOwnedZOrder(overlay.NativeHandle, wrongOwnerHandle, true, delegate { return wrongOwnerHandle; }),
+                            "Foreign owner passed the ownership guard.");
+                        foregroundReads = 0;
+                        Check(!Native.RepairOwnedZOrder(overlay.NativeHandle, ownerHandle, true,
+                            delegate { return ++foregroundReads == 1 ? ownerHandle : IntPtr.Zero; }), "Stale focus repaired order.");
+                        Check(Native.OrderRelativeToOwner(overlay.NativeHandle, ownerHandle) == Native.OwnerOrder.Below,
+                            "Losing focus before SetWindowPos still changed order.");
+                        IntPtr higher = Native.GetWindow(ownerHandle, Native.GW_HWNDPREV);
+                        Check(Native.RepairOwnedZOrder(overlay.NativeHandle, ownerHandle, true, delegate { return ownerHandle; }),
+                            "Focused recreated overlay did not repair order.");
+                        Check(Native.OrderRelativeToOwner(overlay.NativeHandle, ownerHandle) == Native.OwnerOrder.Above,
+                            "Repaired overlay remains below its owner.");
+                        Check(Native.GetWindow(ownerHandle, Native.GW_HWNDPREV) == overlay.NativeHandle, "Overlay was not placed immediately above owner.");
+                        if (higher != IntPtr.Zero && (Native.ExtendedStyle(higher) & Native.WS_EX_TOPMOST) == 0)
+                            Check(Native.GetWindow(overlay.NativeHandle, Native.GW_HWNDPREV) == higher, "Repair crossed a higher normal popup.");
+                        long required = Native.WS_EX_LAYERED | Native.WS_EX_TRANSPARENT | Native.WS_EX_NOACTIVATE | Native.WS_EX_TOOLWINDOW;
+                        Check((Native.ExtendedStyle(overlay.NativeHandle) & required) == required
+                            && (Native.ExtendedStyle(overlay.NativeHandle) & Native.WS_EX_TOPMOST) == 0, "Order repair changed overlay styles or made it topmost.");
+                        Check(Native.GetWindow(overlay.NativeHandle, Native.GW_OWNER) == ownerHandle, "Order repair changed owner.");
+                        Check(Native.GetForegroundWindow() == before, "Order repair activated a test window.");
+                        previous = Native.GetWindow(overlay.NativeHandle, Native.GW_HWNDPREV);
+                        next = Native.GetWindow(overlay.NativeHandle, Native.GW_HWNDNEXT);
+                        Check(!Native.RepairOwnedZOrder(overlay.NativeHandle, ownerHandle, true, delegate { return ownerHandle; }),
+                            "Already-correct ordering was unnecessarily repaired.");
+                        Check(Native.GetWindow(overlay.NativeHandle, Native.GW_HWNDPREV) == previous
+                            && Native.GetWindow(overlay.NativeHandle, Native.GW_HWNDNEXT) == next, "Already-correct order was moved.");
+                    }
+                }
+            });
+            test("owned-overlay-topmost-predecessor-race-and-show-quarantine", delegate
+            {
+                IntPtr before = Native.GetForegroundWindow();
+                using (Form owner = new Form())
+                using (Form higher = new Form())
+                {
+                    IntPtr ownerHandle = owner.Handle, higherHandle = higher.Handle;
+                    using (LayeredOverlay overlay = new LayeredOverlay(ownerHandle))
+                    using (GifSource gif = new GifSource(fixture))
+                    using (Bitmap frame = gif.Render(0, new Rectangle(-32000, -32000, 2, 1), new Rectangle(-32000, -32000, 2, 1)))
+                    {
+                        overlay.PaintBitmap(frame, new Rectangle(-32000, -32000, 2, 1), false);
+                        Check(PositionSyntheticWindow(overlay.NativeHandle, ownerHandle, 0, 0, 0, 0, 0x0213), "Could not reproduce below-owner order.");
+                        IntPtr previous = Native.GetWindow(ownerHandle, Native.GW_HWNDPREV);
+                        if (previous != higherHandle)
+                            Check(PositionSyntheticWindow(higherHandle, previous, 0, 0, 0, 0, 0x0213), "Could not position synthetic higher popup.");
+                        Check(Native.GetWindow(ownerHandle, Native.GW_HWNDPREV) == higherHandle, "Higher-popup race fixture has wrong order.");
+                        int reads = 0;
+                        Check(Native.RepairOwnedZOrder(overlay.NativeHandle, ownerHandle, true, delegate
+                        {
+                            if (++reads == 2)
+                                Check(PositionSyntheticWindow(higherHandle, new IntPtr(-1), 0, 0, 0, 0, 0x0213), "Could not simulate topmost predecessor race.");
+                            return ownerHandle;
+                        }), "Repair did not recover after its predecessor changed tier.");
+                        Check(Native.OrderRelativeToOwner(overlay.NativeHandle, ownerHandle) == Native.OwnerOrder.Above
+                            && (Native.ExtendedStyle(overlay.NativeHandle) & Native.WS_EX_TOPMOST) == 0,
+                            "Stale predecessor promoted the overlay or left it below owner.");
+                        Check((Native.ExtendedStyle(ownerHandle) & Native.WS_EX_TOPMOST) == 0, "Repair changed owner tier.");
+                        Check(PositionSyntheticWindow(overlay.NativeHandle, new IntPtr(-1), 0, 0, 0, 0, 0x0213), "Could not simulate unexpected overlay promotion.");
+                        bool rejected = false;
+                        try { Native.ShowPreservingZOrder(overlay.NativeHandle); }
+                        catch (InvalidOperationException) { rejected = true; }
+                        Check(rejected && !Native.IsWindowVisible(overlay.NativeHandle)
+                            && (Native.ExtendedStyle(overlay.NativeHandle) & Native.WS_EX_TOPMOST) == 0,
+                            "Show path re-exposed a topmost overlay instead of hiding and demoting it.");
+                        Check((Native.ExtendedStyle(ownerHandle) & Native.WS_EX_TOPMOST) == 0 && Native.GetForegroundWindow() == before,
+                            "Quarantine changed the owner tier or foreground window.");
                     }
                 }
             });

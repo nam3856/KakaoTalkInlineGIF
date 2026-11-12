@@ -1,3 +1,13 @@
+# v0.1.2
+
+Fixed GIF overlays being recreated behind their chat window after scrolling away and back. The playback clock could keep advancing while only KakaoTalk's static thumbnail was visible.
+
+The renderer repairs the order only when the actual foreground window is the expected owner and the overlay is proven to be behind it. The overlay stays non-topmost, does not take focus, and retains its normal blur freeze and viewport clipping.
+
+Validation: 57 isolated checks passed (11 renderer, 10 transport, 7 launcher, 17 resolver, 12 host-readiness checks). The renderer tests reproduce below-owner ordering and a changing topmost predecessor with synthetic hidden windows. The live failure was traced and the installed renderer was updated with clean native detachment; final live scroll-return verification remains incomplete. This is a pre-release.
+
+Supports PC KakaoTalk 26.9.2.5342 (32-bit) on Windows x64. The existing original-download and fast-scroll limitations remain. The previously observed Avast quarantine issue is not claimed to be resolved by this renderer update. The ZIP excludes user media, cache indexes, runtime logs and registry backups.
+
 # v0.1.1
 
 Windows x64 startup reliability update for PC KakaoTalk 26.9.2.5342 (32-bit).
