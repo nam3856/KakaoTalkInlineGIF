@@ -68,10 +68,10 @@ function createSourceResolver(context) {
   const options = Object.assign({ maxSourceBytes: 32 * 1024 * 1024, maxJobs: 16, timeoutMs: 45000, pollMs: 400, callsPerPump: 2, retryAfterMs: 30000, maxMetadataRecords: 256 }, context.options || {});
   const zero = asPointer(0);
   const types = {
-    original: base.add(0x21b419c), thumbnail: base.add(0x21b4160), content: base.add(0x21ab29c),
-    gdip: base.add(0x22242c4), webp: base.add(0x2223fd0), memory: base.add(0x22832dc)
+    original: base.add(0x21c65f4), thumbnail: base.add(0x21c65a8), content: base.add(0x21bd268),
+    gdip: base.add(0x22368ec), webp: base.add(0x22365f8), memory: base.add(0x2297ec8)
   };
-  const expectedCtor = '558bec6aff6866f9220264a100000000';
+  const expectedCtor = '558bec6aff6886fa230264a100000000';
   const jobs = new Map();
   const requests = new Map();
   const retryAfter = new Map();
@@ -310,8 +310,8 @@ function createSourceResolver(context) {
   function start() {
     if (running) return { running: true };
     if (!readyAbi()) throw new Error('Verified factory, image, download, variant and shared-owner cleanup adapters are all required');
-    verifyEntry(base.add(0xeb2c90), context.thumbnailCtorGuard || expectedCtor);
-    hook = interceptor.attach(base.add(0xeb2c90), {
+    verifyEntry(base.add(0xeb9b30), context.thumbnailCtorGuard || expectedCtor);
+    hook = interceptor.attach(base.add(0xeb9b30), {
       onEnter(args) { this.gifSourceCapture = { recordRef: args[0], thumbnail: this.context.ecx, threadId: this.threadId }; },
       onLeave() {
         const capture = this.gifSourceCapture;

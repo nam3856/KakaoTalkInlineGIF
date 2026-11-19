@@ -50,17 +50,17 @@ function environment(options={}) {
     const object=mem.alloc(0x140),ref=mem.alloc(8);object.writeU64(log);object.add(8).writeU64(chat);object.add(0x30).writePointer(text(uri));ref.writePointer(object);ref.add(4).writePointer(mem.alloc(16));
     records.set(object.toString(),{log,chat,data,uri});return {object,ref};
   }
-  function thumbnail(item) {const p=mem.alloc(0xc8);p.writePointer(at(0x25b4160));p.add(0x30).writeU64(item.chat);p.add(0x38).writeU64(item.log);p.add(0x50).writePointer(text(item.uri));p.add(0xc0).writeU8(1);return p;}
+  function thumbnail(item) {const p=mem.alloc(0xc8);p.writePointer(at(0x25c65a8));p.add(0x30).writeU64(item.chat);p.add(0x38).writeU64(item.log);p.add(0x50).writePointer(text(item.uri));p.add(0xc0).writeU8(1);return p;}
   const metadata=record();
   const item=records.get(metadata.object.toString());
-  const thumb=thumbnail(item),content=mem.alloc(0x50);content.writePointer(at(0x25ab29c));content.add(0x38).writeU64(item.log);
+  const thumb=thumbnail(item),content=mem.alloc(0x50);content.writePointer(at(0x25bd268));content.add(0x38).writeU64(item.log);
   let releaseThrows=!!options.releaseThrows;
   const abi={verified:true,
     createOriginal(out,recordRef){
       const recordData=records.get(recordRef.readPointer().toString());assert.ok(recordData,'factory receives live real record');
       const object=mem.alloc(0xd0),ctrl=mem.alloc(16),image=mem.alloc(0x70),memory=mem.alloc(20);
-      object.writePointer(at(0x25b419c));object.add(0x28).writeU64(recordData.chat);object.add(0x30).writeU64(recordData.log);ctrl.writePointer(at(0x25a4570));
-      image.writePointer(at(0x26242c4));image.add(0x18).writePointer(memory);memory.writePointer(at(0x26832dc));memory.add(0xc).writeU32(recordData.data.byteLength);encoded.set(memory.toString(),recordData.data);
+      object.writePointer(at(0x25c65f4));object.add(0x28).writeU64(recordData.chat);object.add(0x30).writeU64(recordData.log);ctrl.writePointer(at(0x25b636c));
+      image.writePointer(at(0x26368ec));image.add(0x18).writePointer(memory);memory.writePointer(at(options.memoryType||0x2697ec8));memory.add(0xc).writeU32(recordData.data.byteLength);encoded.set(memory.toString(),recordData.data);
       originals.set(object.toString(),{image,ready:!!options.ready});out.writePointer(object);out.add(4).writePointer(ctrl);counters.shared++;counters.factory++;
     },
     getImage(object,out){const state=originals.get(object.toString());if(state.ready){out.writePointer(state.image);out.add(4).writeU8(0);counters.images++;if(options.getImageThrows)throw Error('injected GetImage error after retained result');}return out;},
@@ -79,8 +79,27 @@ function environment(options={}) {
     interceptor:{attach(address,callbacks){hooks.set(address.toString(),callbacks);return {detach(){hooks.delete(address.toString());}};}}
   };
   const resolver=sandbox.createSourceResolver(context);
-  function trigger(which=metadata,widget=thumb){const cb=hooks.get(at(0x12b2c90).toString());assert.ok(cb);const invocation={context:{ecx:widget},threadId:mem.thread};cb.onEnter.call(invocation,[which.ref]);cb.onLeave.call(invocation,at(0));}
-  return {mem,abi,counters,messages,resolver,trigger,thumb,content,metadata,record,thumbnail,records,context};
+  function trigger(which=metadata,widget=thumb){const cb=hooks.get(at(0x12b9b30).toString());assert.ok(cb);const invocation={context:{ecx:widget},threadId:mem.thread};cb.onEnter.call(invocation,[which.ref]);cb.onLeave.call(invocation,at(0));}
+  return {mem,abi,counters,messages,resolver,trigger,thumb,content,metadata,record,thumbnail,records,context,hooks};
+}
+// Entry bytes independently recorded from the passive 26.10.0.5364 mapped image.
+// Populate real fake-memory bytes so the production guards run without a verifier override.
+const nativeEntryFixture = [
+  [0x1442940, '558bec6aff6897d81d0264a100000000'],
+  [0x8bfc90, '53578bda8bf93bfb7436560f1f440000'],
+  [0x12b8260, '558bec6aff6874f8230264a100000000'],
+  [0x12b8830, '558bec6aff6837f9230264a100000000'],
+  [0x1777a90, '558bec56578b7d0883cefff00fc17704'],
+  [0x8e0950, '568bf18b0e85c974578b560451e82ef3'],
+  [0x1a12780, '558bec6aff68f0652d0264a100000000']
+];
+function guardedNativeEnvironment(moduleBase=0x400000) {
+  const mem=new FakeMemory(),wrappers=[],invocations=[];
+  const at=va=>mem.ptr(moduleBase+va-0x400000);
+  nativeEntryFixture.forEach(([va,hex])=>at(va).writeByteArray(Buffer.from(hex,'hex')));
+  const context={moduleBase:mem.ptr(moduleBase),ptr:x=>mem.ptr(x),pointerSize:4,pageSize:4096,memory:mem,
+    nativeFunction(address,result,args,abi){wrappers.push({address,result,args,abi});return (...params)=>{invocations.push({address,params});return 0;};}};
+  return {mem,at,wrappers,invocations,context};
 }
 const tests=[];
 function test(name,fn){fn();tests.push(name);}
@@ -94,13 +113,56 @@ test('An uncertain native release is tracked and never attempted twice',()=>{con
 test('Existing message route destroys metadata vector after creating its independent owner',()=>{const e=environment({ready:true});e.resolver.start();assert.equal(e.resolver.requestExisting({thumbnail:e.thumb,content:e.content}),true);assert.equal(e.resolver.requestExisting({thumbnail:e.thumb,content:e.content}),false);e.resolver.pump();assert.equal(e.messages.filter(x=>x.binary).length,1);assert.equal(e.counters.metadata,0);assert.equal(e.counters.vectors,0);assert.equal(e.counters.shared,0);assert.equal(e.counters.images,0);assert.equal(e.resolver.status().canUnload,true);assert.ok(!JSON.stringify(e.messages.map(x=>x.meta)).includes('https://'));});
 test('Existing metadata match checks URI bytes when message and chat IDs coincide',()=>{const e=environment({ready:true});const wrong=e.record('12','34','https://example.invalid/other.gif');e.abi.getMetadata=(out)=>{const data=e.mem.alloc(16);[wrong,e.metadata].forEach((r,i)=>{data.add(i*8).writePointer(r.object);data.add(i*8+4).writePointer(r.ref.add(4).readPointer());e.counters.metadata++;});out.writePointer(data);out.add(4).writePointer(data.add(16));out.add(8).writePointer(data.add(16));e.counters.vectors++;return 1;};e.resolver.start();e.resolver.requestExisting({thumbnail:e.thumb,content:e.content});e.resolver.pump();assert.equal(e.counters.factory,1);assert.equal(e.counters.metadata,0);assert.equal(e.messages.filter(x=>x.binary).length,1);});
 test('Missing ownership proof blocks activation before attaching a constructor hook',()=>{const e=environment();e.abi.verified=false;assert.throws(()=>e.resolver.start(),/Verified factory/);assert.equal(e.counters.factory,0);});
+test('A changed thumbnail constructor opcode prevents hooking or acquiring native owners',()=>{
+  const e=environment();delete e.context.verifyEntry;
+  e.mem.ptr(0x12b9b30).writeByteArray(Buffer.from('558bec6aff6886fa230264a100000000','hex'));
+  e.mem.ptr(0x12b9b30).add(6).writeU8(0);
+  assert.throws(()=>e.resolver.start(),/entry guard mismatch/);
+  assert.equal(e.hooks.size,0);assert.equal(e.counters.factory,0);
+});
+test('The adjacent input-stream vtable is rejected and both retained owners are balanced',()=>{
+  const e=environment({ready:true,memoryType:0x2697ed4});e.resolver.start();e.trigger();e.resolver.pump();
+  assert.equal(e.messages.filter(x=>x.binary).length,0);
+  assert.ok(e.messages.some(x=>x.meta.type==='source-error'&&x.meta.error.includes('encoded-memory type')));
+  assert.equal(e.counters.shared,0);assert.equal(e.counters.images,0);assert.equal(e.resolver.status().canUnload,true);
+});
 test('Malformed metadata output is never passed to an unsafe native vector destructor',()=>{const e=environment();let releases=0;e.abi.getMetadata=out=>{const p=e.mem.alloc(16);out.writePointer(p);out.add(4).writePointer(p.sub(8));out.add(8).writePointer(p.add(16));return 1;};e.abi.releaseMetadataVector=()=>{releases++;};e.resolver.start();e.resolver.requestExisting({thumbnail:e.thumb,content:e.content});e.resolver.pump();assert.equal(releases,0);assert.equal(e.resolver.status().uncertainResources,1);assert.equal(e.resolver.status().canUnload,false);});
 test('A throwing getter with zero output needs no native cleanup and preserves its error',()=>{const e=environment();let releases=0;e.abi.getMetadata=()=>{throw Error('empty getter failure');};e.abi.releaseMetadataVector=()=>{releases++;};e.resolver.start();e.resolver.requestExisting({thumbnail:e.thumb,content:e.content});e.resolver.pump();assert.equal(releases,0);assert.equal(e.resolver.status().canUnload,true);assert.ok(e.messages.some(x=>x.meta.type==='metadata-error'));});
 test('A partially unwound metadata getter is tracked without double-freeing its output',()=>{const e=environment();let releases=0;e.abi.getMetadata=out=>{const p=e.mem.alloc(8);out.writePointer(p);out.add(4).writePointer(p.add(8));out.add(8).writePointer(p.add(8));throw Error('partially unwound getter');};e.abi.releaseMetadataVector=()=>{releases++;};e.resolver.start();e.resolver.requestExisting({thumbnail:e.thumb,content:e.content});e.resolver.pump();assert.equal(releases,0);assert.equal(e.resolver.status().uncertainResources,1);});
 test('Frida Windows ABI enum uses mscdecl for the private caller-cleaned shim',()=>{const m=new FakeMemory(),allowed=new Set(['sysv','stdcall','thiscall','fastcall','mscdecl']);sandbox.createSourceResolverNativeAbi({moduleBase:m.ptr(0x400000),ptr:x=>m.ptr(x),pointerSize:4,pageSize:4096,memory:m,verifyEntry(){},nativeFunction:(address,result,args,abi)=>{assert.ok(allowed.has(abi),'unsupported Frida ABI '+abi);return ()=>0;}});});
 test('Synchronous nested UI paint pumps cannot reenter factory or image resolution',()=>{const e=environment({ready:true});const factory=e.abi.createOriginal,getImage=e.abi.getImage;e.abi.createOriginal=(...args)=>{e.resolver.pump();return factory(...args);};e.abi.getImage=(...args)=>{e.resolver.pump();return getImage(...args);};e.resolver.start();e.trigger();e.resolver.pump();assert.equal(e.counters.factory,1);assert.equal(e.messages.filter(x=>x.binary).length,1);assert.equal(e.counters.shared,0);assert.equal(e.counters.images,0);});
 test('Shutdown cannot unload the private shim while a cooperative metadata native call is in flight',()=>{const e=environment();const getter=e.abi.getMetadata;let inFlight;e.abi.getMetadata=(...args)=>{e.resolver.stop();inFlight=e.resolver.status();return getter(...args);};e.resolver.start();e.resolver.requestExisting({thumbnail:e.thumb,content:e.content});const drained=e.resolver.pump();assert.equal(inFlight.canUnload,false);assert.equal(inFlight.nativeDepth,1);assert.equal(e.counters.factory,0);assert.equal(e.counters.metadata,0);assert.equal(e.counters.vectors,0);assert.equal(drained.canUnload,true);});
-test('Native adapter builds only the verified ABI wrappers and private cdecl metadata shim',()=>{const mem=new FakeMemory(),calls=[],guards=[];let factoryOut;const base=mem.ptr(0x400000);const functions=(address,result,args,abi)=>{calls.push({address:address.toString(),result,args,abi});return (...params)=>{if(address.equals(mem.ptr(0x143c050))){factoryOut=params[0];const object=mem.alloc(0xd0),ctrl=mem.alloc(16);object.writePointer(mem.ptr(0x25b419c));ctrl.writePointer(mem.ptr(0x25a4570));params[0].writePointer(object);params[0].add(4).writePointer(ctrl);return params[0];}return params[1]||0;};};const adapter=sandbox.createSourceResolverNativeAbi({moduleBase:base,ptr:x=>mem.ptr(x),pointerSize:4,pageSize:4096,memory:mem,nativeFunction:functions,verifyEntry:(p,h)=>guards.push({p:p.toString(),h})});const ref=mem.alloc(8);ref.writePointer(mem.alloc(16));const out=mem.alloc(8);adapter.createOriginal(out,ref);assert.ok(factoryOut.equals(out));adapter.releaseShared(out);assert.ok(out.readPointer().isNull());assert.equal(calls.find(x=>x.address==='0x143c050').abi,'fastcall');assert.equal(calls.find(x=>x.address==='0x176fa50').abi,'stdcall');assert.equal(calls.find(x=>x.address===adapter.metadataShimAllocation.toString()).abi,'mscdecl');assert.equal(adapter.metadataShimAllocation.readByteArray(22).byteLength,22);assert.deepEqual(Array.from(new Uint8Array(adapter.metadataShimAllocation.readByteArray(13))),[0x55,0x8b,0xec,0xff,0x75,0x10,0xff,0x75,0x0c,0x8b,0x4d,0x08,0xe8]);assert.equal(guards.length,7);});
+test('Native adapter builds only the verified ABI wrappers and private cdecl metadata shim',()=>{const mem=new FakeMemory(),calls=[],guards=[];let factoryOut;const base=mem.ptr(0x400000);const functions=(address,result,args,abi)=>{calls.push({address:address.toString(),result,args,abi});return (...params)=>{if(address.equals(mem.ptr(0x1442940))){factoryOut=params[0];const object=mem.alloc(0xd0),ctrl=mem.alloc(16);object.writePointer(mem.ptr(0x25c65f4));ctrl.writePointer(mem.ptr(0x25b636c));params[0].writePointer(object);params[0].add(4).writePointer(ctrl);return params[0];}return params[1]||0;};};const adapter=sandbox.createSourceResolverNativeAbi({moduleBase:base,ptr:x=>mem.ptr(x),pointerSize:4,pageSize:4096,memory:mem,nativeFunction:functions,verifyEntry:(p,h)=>guards.push({p:p.toString(),h})});const ref=mem.alloc(8);ref.writePointer(mem.alloc(16));const out=mem.alloc(8);adapter.createOriginal(out,ref);assert.ok(factoryOut.equals(out));adapter.releaseShared(out);assert.ok(out.readPointer().isNull());assert.equal(calls.find(x=>x.address==='0x1442940').abi,'fastcall');assert.equal(calls.find(x=>x.address==='0x1777a90').abi,'stdcall');assert.equal(calls.find(x=>x.address===adapter.metadataShimAllocation.toString()).abi,'mscdecl');assert.equal(adapter.metadataShimAllocation.readByteArray(22).byteLength,22);assert.deepEqual(Array.from(new Uint8Array(adapter.metadataShimAllocation.readByteArray(13))),[0x55,0x8b,0xec,0xff,0x75,0x10,0xff,0x75,0x0c,0x8b,0x4d,0x08,0xe8]);assert.equal(guards.length,7);});
+test('Every native entry guard rejects a changed byte before any native invocation',()=>{
+  for(const [va] of nativeEntryFixture){
+    const e=guardedNativeEnvironment();const address=e.at(va);address.add(6).writeU8(address.add(6).readU8()^1);
+    assert.throws(()=>sandbox.createSourceResolverNativeAbi(e.context),/source ABI byte mismatch/,'guard at '+address);
+    assert.equal(e.invocations.length,0);
+  }
+});
+test('A relocated module preserves all calling conventions and the private caller-cleaned shim target',()=>{
+  const e=guardedNativeEnvironment(0x62000000),adapter=sandbox.createSourceResolverNativeAbi(e.context);
+  assert.deepEqual(e.wrappers.slice(0,6).map(x=>x.address.toString()),nativeEntryFixture.slice(0,6).map(([va])=>e.at(va).toString()));
+  assert.deepEqual(e.wrappers.map(x=>[x.result,Array.from(x.args),x.abi]),[
+    ['pointer',['pointer','pointer'],'fastcall'],['void',['pointer','pointer'],'fastcall'],
+    ['pointer',['pointer','pointer'],'thiscall'],['int',['pointer'],'thiscall'],
+    ['uint',['pointer'],'stdcall'],['void',['pointer'],'thiscall'],['uint8',['pointer','uint','uint'],'mscdecl']
+  ]);
+  const shim=adapter.metadataShimAllocation,relative=shim.add(13).readU32()|0;
+  assert.ok(shim.add(17+relative).equals(e.at(0x1a12780)),'CALL must target the relocated getter');
+  assert.deepEqual(Array.from(new Uint8Array(shim.add(17).readByteArray(5))),[0x83,0xc4,0x08,0x5d,0xc3]);
+  assert.equal(e.invocations.length,0,'adapter construction only verifies and builds wrappers');
+});
+test('A changed native virtual slot cannot dispatch download or image cleanup',()=>{
+  const e=guardedNativeEnvironment(),adapter=sandbox.createSourceResolverNativeAbi(e.context);
+  const original=e.mem.alloc(0x40);original.writePointer(e.at(0x25c65f4));
+  e.at(0x25c65f4).add(8).writePointer(e.at(0x12b8830).add(1));
+  assert.throws(()=>adapter.download(original),/download virtual-slot guard/);
+  const pair=e.mem.alloc(8),image=e.mem.alloc(0x30);pair.writePointer(image);pair.add(4).writeU8(0);image.writePointer(e.at(0x26368ec));
+  e.at(0x26368ec).add(8).writePointer(e.at(0x1777a90).add(1));
+  assert.throws(()=>adapter.releaseVariant(pair),/Release virtual-slot guard/);
+  assert.ok(pair.readPointer().equals(image),'an unproven release keeps its owner tracked');assert.equal(e.invocations.length,0);
+});
 const report={passed:tests.length,tests,scope:'Synthetic ownership, state machine, GIF parsing, ABI wrapper construction and private shim bytes only. No Kakao process access, attachment, calls, downloads or code changes.'};
 if (process.env.INLINEGIF_TEST_REPORT) fs.writeFileSync(process.env.INLINEGIF_TEST_REPORT,JSON.stringify(report,null,2));
 console.log(JSON.stringify(report,null,2));

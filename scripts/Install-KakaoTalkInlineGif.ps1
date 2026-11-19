@@ -70,8 +70,8 @@ foreach ($file in @($NodePath,(Join-Path $DependencyRoot 'frida\build\src\frida.
 $installRoot = Assert-InstallSibling $installRoot 'KakaoTalkInlineGif'
 $fridaInfo = Get-Content -LiteralPath (Join-Path $DependencyRoot 'frida\package.json') -Raw | ConvertFrom-Json
 $plan = [ordered]@{ installRoot=$installRoot; packageRoot=$PackageRoot; node=$NodePath; dependencyRoot=$DependencyRoot;
-    fridaVersion=$fridaInfo.version; startup=(-not $NoStartup); start=(-not $NoStart); supportedKakaoVersion='26.9.2.5342';
-    supportedKakaoSha256='ec0f43b67cc7e81544464f649a5dfbd690776968014d34d7c554b7a9382a2290' }
+    fridaVersion=$fridaInfo.version; startup=(-not $NoStartup); start=(-not $NoStart); supportedKakaoVersion='26.10.0.5364';
+    supportedKakaoSha256='1ab869f1735ddb948fd43dbc4d128be7f7509deb9bea1b4daf3f56cb942a52e2' }
 if ($CheckOnly) { $plan | ConvertTo-Json; return }
 
 Stop-ExistingHelper

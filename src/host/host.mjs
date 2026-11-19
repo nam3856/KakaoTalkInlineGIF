@@ -11,7 +11,7 @@ const controlPath=path.join(root,'control.json'),indexPath=path.join(cacheDir,'i
 const programFiles=process.env['ProgramFiles(x86)']||process.env.ProgramFiles;
 if(!process.env.INLINEGIF_KAKAO_PATH&&!programFiles)throw new Error('Windows Program Files location is unavailable');
 const targetPath=process.env.INLINEGIF_KAKAO_PATH||path.join(programFiles,'Kakao','KakaoTalk','KakaoTalk.exe');
-const supportedHash='ec0f43b67cc7e81544464f649a5dfbd690776968014d34d7c554b7a9382a2290';
+const supportedHash='1ab869f1735ddb948fd43dbc4d128be7f7509deb9bea1b4daf3f56cb942a52e2';
 const sha=b=>createHash('sha256').update(b).digest('hex');
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 let writeSequence=0;
@@ -110,7 +110,7 @@ try{
       try{
       appPid=app.pid;disconnected=false;session=await frida.attach(appPid);
       session.detached.connect(()=>{disconnected=true;});
-      const config={pid:appPid,testTitle:process.env.INLINEGIF_TEST_TITLE??'',setImageGuard:'558bec6aff68bd0e1d0264a100000000'};
+      const config={pid:appPid,testTitle:process.env.INLINEGIF_TEST_TITLE??'',setImageGuard:'558bec6aff68cd1b1e0264a100000000'};
       const files=['memory.js','native-abi.js','source-resolver.js','runtime.js'];
       const source='globalThis.INLINE_GIF_CONFIG='+JSON.stringify(config)+';\n'+(await Promise.all(files.map(f=>readFile(path.join(agentDir,f),'utf8')))).join('\n');
       script=await session.createScript(source);

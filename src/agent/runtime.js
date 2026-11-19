@@ -87,13 +87,13 @@ function trackWidget(address,painted=false,args=null,gdiPaint=true){
   }catch(_){}
 }
 function trackThumb(address){
-  try{if(address.readPointer().equals(module.base.add(0x21b4160))&&address.add(0xc0).readU8())thumbs.set(address.toString(),{address:address.toString(),identity:identity(address)});}catch(_){}
+  try{if(address.readPointer().equals(module.base.add(0x21c65a8))&&address.add(0xc0).readU8())thumbs.set(address.toString(),{address:address.toString(),identity:identity(address)});}catch(_){}
 }
 function thumbnailFor(w){
   const gdips=new Set((w.source?.pieces||[]).map(p=>p.gdip));
   for(const [key,thumb]of thumbs){
     try{
-      const p=ptr(thumb.address);if(!p.readPointer().equals(module.base.add(0x21b4160))||p.add(0xc0).readU8()===0){thumbs.delete(key);continue;}
+      const p=ptr(thumb.address);if(!p.readPointer().equals(module.base.add(0x21c65a8))||p.add(0xc0).readU8()===0){thumbs.delete(key);continue;}
       const current=identity(p);if(current.assetKey!==thumb.identity.assetKey){thumbs.delete(key);continue;}
       if(p.add(0x1c).readU8()===0&&gdips.has(p.add(0x18).readPointer().toString()))return thumb;
     }catch(_){thumbs.delete(key);}
@@ -137,13 +137,13 @@ function uiPump(){
 }
 function startup(){
   findMainUi();
-  const paint=module.base.add(0x1356330),paintAlt=module.base.add(0x1356b70),setImage=module.base.add(0x1355e60);
-  guard(paint,'558bec6aff68911a290264a100000000');
+  const paint=module.base.add(0x135e3e0),paintAlt=module.base.add(0x135ec20),setImage=module.base.add(0x135df10);
+  guard(paint,'558bec6aff68011a2a0264a100000000');
   guard(paintAlt,'558bec83ec10538bd9568b7508578b4b');
-  if(inlineConfig.setImageGuard)guard(setImage,inlineConfig.setImageGuard);
-  const thumbGetEntry=module.base.add(0x21b4160).add(4).readPointer();
-  if(!thumbGetEntry.equals(module.base.add(0xeb2fe0)))throw new Error('Thumbnail getter virtual slot changed');
-  guard(thumbGetEntry,'558bec6aff68e6f9220264a100000000');
+  guard(setImage,'558bec6aff68cd1b1e0264a100000000');
+  const thumbGetEntry=module.base.add(0x21c65a8).add(4).readPointer();
+  if(!thumbGetEntry.equals(module.base.add(0xeb9e80)))throw new Error('Thumbnail getter virtual slot changed');
+  guard(thumbGetEntry,'558bec6aff6806fb230264a100000000');
   const abi=createSourceResolverNativeAbi({moduleBase:module.base,pointerSize:4,verifyEntry:guard});
   resolver=createSourceResolver({moduleBase:module.base,pid:Process.id,abi,verifyEntry:guard,
     isUiThread:thread=>uiThreads.has(Number(thread)),isChatTarget:meta=>runtimeState.enabled&&allowedAssets.has(meta.assetKey||meta.key),

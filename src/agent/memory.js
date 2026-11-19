@@ -22,7 +22,7 @@ const globalSize=new NativeFunction(kernel.getExportByName('GlobalSize'),'uint',
 const gdiplus=Process.getModuleByName('gdiplus.dll');
 const getFrameCount=new NativeFunction(gdiplus.getExportByName('GdipImageGetFrameCount'),'int',['pointer','pointer','pointer'],'stdcall');
 const timeGuid=Memory.alloc(16);timeGuid.writeByteArray([0x6d,0xbd,0xed,0x6a,0xb5,0x3f,0x8a,0x41,0x83,0xa6,0x7f,0x45,0x22,0x9d,0xc8,0x72]);
-const widgetVt = module.base.add(0x20edc6c);
+const widgetVt = module.base.add(0x20fec18);
 const targetTitle = inlineConfig.testTitle || ''; // Optional developer filter; no personal chat name is built in.
 const chatRootCache=new Map();
 function isChatRoot(root){
@@ -54,14 +54,14 @@ function screenPoint(hwnd,x,y) {
 }
 function sourceState(image) {
   try {
-    if(!image.readPointer().equals(module.base.add(0x20bedc8)))return null;
+    if(!image.readPointer().equals(module.base.add(0x20cefe8)))return null;
     const begin=image.add(0x3c).readPointer(),end=image.add(0x40).readPointer();
     const count=end.sub(begin).toInt32()/4;if(count<1||count>64||!Number.isInteger(count))return null;
     const pieces=[];
     for(let i=0;i<count;i++){
-      const piece=begin.add(i*4).readPointer();if(piece.isNull()||!piece.readPointer().equals(module.base.add(0x22247a8)))continue;
-      const gdip=piece.add(0xc).readPointer();if(gdip.isNull()||!gdip.readPointer().equals(module.base.add(0x22242c4)))continue;
-      const memory=gdip.add(0x18).readPointer();if(memory.isNull()||!memory.readPointer().equals(module.base.add(0x22832dc)))continue;
+      const piece=begin.add(i*4).readPointer();if(piece.isNull()||!piece.readPointer().equals(module.base.add(0x2236d60)))continue;
+      const gdip=piece.add(0xc).readPointer();if(gdip.isNull()||!gdip.readPointer().equals(module.base.add(0x22368ec)))continue;
+      const memory=gdip.add(0x18).readPointer();if(memory.isNull()||!memory.readPointer().equals(module.base.add(0x2297ec8)))continue;
       const length=memory.add(0xc).readU32(),buffer=memory.add(0x10).readPointer();
       let header=null;
       if(length>=8&&length<67108864){
@@ -122,7 +122,7 @@ function widgetState(p) {
 rpc.exports = {
   scanContentLinks(maxBytes=268435456) {
     maxBytes=Number(maxBytes)||268435456;const links=[];let bytes=0,contents=0;
-    const vt=module.base.add(0x21ab29c),pattern=Array.from(new Uint8Array(new Uint32Array([vt.toUInt32()]).buffer),b=>b.toString(16).padStart(2,'0')).join(' ');
+    const vt=module.base.add(0x21bd268),pattern=Array.from(new Uint8Array(new Uint32Array([vt.toUInt32()]).buffer),b=>b.toString(16).padStart(2,'0')).join(' ');
     for(const range of Process.enumerateRanges({protection:'rw-',coalesce:true})){
       if(range.file)continue;
       for(let o=0;o<range.size&&bytes<maxBytes;o+=4194304){
@@ -150,10 +150,10 @@ rpc.exports = {
     return addresses.map(a=>widgetState(ptr(a))).filter(Boolean);
   },
   readContainerGif(address) {
-    const c=ptr(address);if(!c.readPointer().equals(module.base.add(0x21b419c)))throw new Error('Invalid original container');
+    const c=ptr(address);if(!c.readPointer().equals(module.base.add(0x21c65f4)))throw new Error('Invalid original container');
     if(c.add(0x1c).readU8()!==0)throw new Error('Unsupported original image kind');
-    const image=c.add(0x18).readPointer();if(image.isNull()||!image.readPointer().equals(module.base.add(0x22242c4)))throw new Error('Original image not ready');
-    const memory=image.add(0x18).readPointer();if(!memory.readPointer().equals(module.base.add(0x22832dc)))throw new Error('Original memory type changed');
+    const image=c.add(0x18).readPointer();if(image.isNull()||!image.readPointer().equals(module.base.add(0x22368ec)))throw new Error('Original image not ready');
+    const memory=image.add(0x18).readPointer();if(!memory.readPointer().equals(module.base.add(0x2297ec8)))throw new Error('Original memory type changed');
     const length=memory.add(0xc).readU32(),handle=memory.add(8).readPointer();
     if(length<8||length>16777216||globalSize(handle)<length)throw new Error('Invalid GIF buffer length');
     const buffer=globalLock(handle);if(buffer.isNull())throw new Error('GIF buffer unavailable');
@@ -161,7 +161,7 @@ rpc.exports = {
   },
   scanContainers(maxBytes=268435456) {
     maxBytes=Number(maxBytes)||268435456;
-    const kinds=[{name:'original',rva:0x21b419c,log:0x30,chat:0x28,key:0x48},{name:'thumbnail',rva:0x21b4160,log:0x38,chat:0x30,key:0x50}];
+    const kinds=[{name:'original',rva:0x21c65f4,log:0x30,chat:0x28,key:0x48},{name:'thumbnail',rva:0x21c65a8,log:0x38,chat:0x30,key:0x50}];
     const rows=[];let bytes=0;
     function stringValue(p){try{const n=p.sub(8).readU32();return n<4096?p.readUtf8String(n):null;}catch(_){return null;}}
     for(const range of Process.enumerateRanges({protection:'rw-',coalesce:true})){
@@ -175,9 +175,9 @@ rpc.exports = {
             const p=hit.address,tag=p.add(0x1c).readU8(),image=p.add(0x18).readPointer();if(tag>1&&tag!==255)continue;
             const log=p.add(kind.log).readU64().toString(),chat=p.add(kind.chat).readU64().toString();if(log==='0')continue;
             const key=stringValue(p.add(kind.key).readPointer());let source=null;
-            if(tag===0&&!image.isNull()&&image.readPointer().equals(module.base.add(0x22242c4))){
+            if(tag===0&&!image.isNull()&&image.readPointer().equals(module.base.add(0x22368ec))){
               const mem=image.add(0x18).readPointer();
-              if(!mem.isNull()&&mem.readPointer().equals(module.base.add(0x22832dc))){
+              if(!mem.isNull()&&mem.readPointer().equals(module.base.add(0x2297ec8))){
                 const length=mem.add(0xc).readU32(),handle=mem.add(8).readPointer();let magic=null;
                 if(length>=8&&length<67108864&&globalSize(handle)>=length){const data=globalLock(handle);if(!data.isNull())try{magic=Array.from(new Uint8Array(data.readByteArray(8)),b=>b.toString(16).padStart(2,'0')).join('');}finally{globalUnlock(handle);}}
                 source={memory:mem.toString(),length,magic};
@@ -236,7 +236,7 @@ rpc.exports = {
       api:{InvalidateRect:user.getExportByName('InvalidateRect').toString()},limitations:['Read-only heap pointer search; stale allocation candidates rejected by type, HWND, PID and target title guards.']};
   },
   instructions(rva,count=40) {
-    const allowed=[0x1355e60,0xe594b0,0xeb13d0,0xeb4840];
+    const allowed=[0x135df10,0xe601f0,0xeb8260,0xebb6e0];
     if(!allowed.includes(rva)||count>80)throw new Error('Unregistered instruction probe');
     let p=module.base.add(rva);const out=[];
     for(let i=0;i<count;i++){const instruction=Instruction.parse(p);out.push({address:p.toString(),text:instruction.toString()});p=instruction.next;}

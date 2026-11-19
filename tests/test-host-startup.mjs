@@ -8,7 +8,7 @@ import path from 'node:path';
 // No child process, native binding, installed application or registry is used.
 const hostPath=process.argv[2]||fileURLToPath(new URL('../src/host/host.mjs',import.meta.url));
 const source=await readFile(hostPath,'utf8');
-const supportedHash='ec0f43b67cc7e81544464f649a5dfbd690776968014d34d7c554b7a9382a2290';
+const supportedHash='1ab869f1735ddb948fd43dbc4d128be7f7509deb9bea1b4daf3f56cb942a52e2';
 assert.ok(source.includes("const supportedHash='"+supportedHash+"'"),'The production compatibility hash must remain pinned');
 const imports=source.match(/^import .*;\r?$/gm)||[];
 assert.equal(imports.length,5,'Update the mock module loader if production imports change');
@@ -43,6 +43,7 @@ async function run(scenario={}){
       const state=JSON.parse(files.get(to));states.push(state);record('state',{state:state.state});
       if(state.state==='running'&&!scenario.reconnectAfterHealthy)control.shutdown=true;
       if(state.state==='waiting-for-runtime'&&scenario.stopDuringRetry)control.shutdown=true;
+      if(state.state==='unsupported-version'&&scenario.executableHash)control.shutdown=true;
     }
   };
   const fakeFrida={
@@ -56,7 +57,10 @@ async function run(scenario={}){
       let detachedCallback,listener,ready=false,shuttingDown=false;
       return{
         detached:{connect(fn){detachedCallback=fn;}},
-        async createScript(){
+        async createScript(agentSource){
+          const configuration=JSON.parse(agentSource.split('\n')[0].replace(/^globalThis\.INLINE_GIF_CONFIG=/,'').replace(/;$/,''));
+          assert.equal(configuration.pid,pid);
+          assert.equal(configuration.setImageGuard,'558bec6aff68cd1b1e0264a100000000','Host must inject the verified new-build SetImage guard');
           record('create-script',{attempt});
           const emit=message=>{record('message',{attempt,messageType:message.type,eventKind:message.payload?.kind});listener(message);};
           const exports=new Proxy({}, {get(_target,name){return async(...args)=>{
@@ -100,7 +104,7 @@ async function run(scenario={}){
     importFrida:async()=>fakeFrida,
     readFile:read,writeFile:async(file,value)=>{files.set(file,String(value));},rename,mkdir:async()=>{},access:async()=>failMissing(),
     open:async()=>{throw new Error('Unexpected filesystem open');},stat:async()=>{throw new Error('Unexpected stat');},unlink:async file=>{files.delete(file);},
-    createHash:()=>({update(){return this;},digest(){return supportedHash;}}),
+    createHash:()=>({update(){return this;},digest(){return scenario.executableHash||supportedHash;}}),
     spawn(){throw new Error('The startup scenarios must not launch a renderer');}
   };
   const context=vm.createContext(sandbox);
@@ -108,7 +112,7 @@ async function run(scenario={}){
   try{
     await Promise.race([
       vm.runInContext('(async()=>{\n'+runnable+'\n})()',context,{filename:'synthetic-host.mjs',timeout:1000}),
-      new Promise((_,reject)=>{deadline=realSetTimeout(()=>reject(new Error('Synthetic host did not finish')),3000);})
+      new Promise((_,reject)=>{deadline=realSetTimeout(()=>reject(new Error('Synthetic host did not finish: '+JSON.stringify({events:events.slice(-8),states:states.slice(-2),logs:logs.slice(-2)}))),3000);})
     ]);
     assert.equal(timers.size,0,'Startup/cleanup must not leave a readiness or retry timer pending');
     return{events,logs,states,attachCount,controlReads,elapsed,exitCode:fakeProcess.exitCode};
@@ -116,13 +120,19 @@ async function run(scenario={}){
 }
 
 const passed=[];
-async function test(name,check){await check();passed.push(name);}
+async function test(name,check){try{await check();passed.push(name);}catch(error){error.message=name+': '+error.message;throw error;}}
 const count=(r,kind)=>r.events.filter(e=>e.kind===kind).length;
 function assertEarlyCleanup(result,attempts=1){
   assert.equal(result.attachCount,attempts);assert.equal(count(result,'rpc'),0);
   assert.equal(count(result,'unload'),attempts);assert.equal(count(result,'detach'),attempts);
   assert.equal(result.states.at(-1).state,'stopped');assert.equal(result.states.at(-1).clean,true);
 }
+await test('an-unrecognized-executable-is-rejected-before-attach-or-native-rpc',async()=>{
+  const r=await run({executableHash:'0'.repeat(64)});
+  assert.equal(r.attachCount,0);assert.equal(count(r,'rpc'),0);
+  assert.ok(r.states.some(s=>s.state==='unsupported-version'));
+  assert.equal(r.states.at(-1).state,'stopped');assert.equal(r.exitCode,undefined);
+});
 await test('resolved-script-load-plus-early-agent-error-unloads-and-detaches-without-any-rpc',async()=>{
   const r=await run({behavior:()=> 'early-error'});assertEarlyCleanup(r);assert.equal(r.exitCode,1);
   assert.ok(r.logs.some(l=>l.type==='host-error'&&l.error.includes('Synthetic early bootstrap fault')));

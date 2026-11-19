@@ -1,16 +1,18 @@
 [CmdletBinding()]
 param(
-    [string]$Version = '0.1.2',
+    [string]$Version = '0.1.3',
     [switch]$BundleRuntime,
     [string]$NodeExecutable = '',
     [string]$DependencyRoot = '',
+    [string]$ArtifactsRoot = '',
     [switch]$Zip
 )
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'Build on Windows x64.' }
 if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$') { throw 'Invalid release version.' }
 $repo = [IO.Path]::GetFullPath($PSScriptRoot)
-$artifacts = [IO.Path]::GetFullPath((Join-Path $repo 'artifacts'))
+if (-not $ArtifactsRoot) { $ArtifactsRoot = Join-Path $repo 'artifacts' }
+$artifacts = [IO.Path]::GetFullPath($ArtifactsRoot)
 $releaseName = "KakaoTalkInlineGIF-$Version-win-x64"
 $release = [IO.Path]::GetFullPath((Join-Path $artifacts $releaseName))
 $package = Join-Path $release 'package'

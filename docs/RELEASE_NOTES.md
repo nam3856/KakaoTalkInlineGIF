@@ -1,3 +1,13 @@
+# v0.1.3
+
+Supports PC KakaoTalk 26.10.0.5364 (32-bit), executable SHA-256 `1ab869f1735ddb948fd43dbc4d128be7f7509deb9bea1b4daf3f56cb942a52e2`. This build replaces the previous 26.9.2 pin; other executable hashes are rejected before attachment.
+
+Updated widget hooks, image/container types, original-source functions and exact code guards after comparing the new runtime image with the previously verified build. External calling conventions and ownership rules are unchanged. The SetImage entry guard is now mandatory even when the agent is started without the host configuration. The v0.1.2 renderer is unchanged.
+
+Validation: 63 isolated checks passed (11 renderer, 10 transport, 7 launcher, 22 resolver, 13 host readiness). Tests include changed-byte rejection, relocated-module ABI/shim construction, virtual-slot checks and rejection of the adjacent input-stream type. Bundled Node/Frida verification succeeded without attaching to an application. A separate live deployment attached successfully to the pinned new build, resolved three original GIFs and reported zero resolver/source errors. The user confirmed autoplay, focus-return and scroll-return playback. Automated window capture failed, so independent visual confirmation is unavailable.
+
+Build and test scripts accept `-ArtifactsRoot` for output on another drive. Existing original-download, fast-scroll and security-product limitations remain. The separate advertisement helper was not changed; its window-class contract still matches the updated app, while its pixels were not captured.
+
 # v0.1.2
 
 Fixed GIF overlays being recreated behind their chat window after scrolling away and back. The playback clock could keep advancing while only KakaoTalk's static thumbnail was visible.

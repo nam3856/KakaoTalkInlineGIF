@@ -1,11 +1,12 @@
 [CmdletBinding()]
-param([string]$NodeExecutable = '', [switch]$RegistryTests)
+param([string]$NodeExecutable = '', [switch]$RegistryTests, [string]$ArtifactsRoot = '')
 $ErrorActionPreference = 'Stop'
 $repo = $PSScriptRoot
 $compiler = Join-Path $env:windir 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path -LiteralPath $compiler)) { throw 'The .NET Framework compiler is required.' }
 if (-not $NodeExecutable) { $NodeExecutable = (Get-Command node -ErrorAction Stop).Source }
-$tests = Join-Path $repo ('artifacts\tests-' + [Guid]::NewGuid().ToString('N'))
+if (-not $ArtifactsRoot) { $ArtifactsRoot = Join-Path $repo 'artifacts' }
+$tests = Join-Path ([IO.Path]::GetFullPath($ArtifactsRoot)) ('tests-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tests -Force | Out-Null
 function Assert-Result([string]$Path, [int]$Minimum) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Test process produced no fresh report: $Path" }
@@ -44,15 +45,15 @@ try {
     & $NodeExecutable (Join-Path $repo 'tests\test-resolver.cjs')
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $env:INLINEGIF_TEST_REPORT)) { throw 'Resolver tests did not produce a fresh success report.' }
     $resolverResult = Get-Content -LiteralPath $env:INLINEGIF_TEST_REPORT -Raw | ConvertFrom-Json
-    if ($resolverResult.passed -lt 17) { throw 'Resolver test coverage is incomplete.' }
+    if ($resolverResult.passed -lt 22) { throw 'Resolver test coverage is incomplete.' }
 } finally { Remove-Item Env:INLINEGIF_TEST_REPORT -ErrorAction SilentlyContinue }
 $priorHostReport = $env:INLINEGIF_HOST_TEST_REPORT
 $env:INLINEGIF_HOST_TEST_REPORT = Join-Path $tests 'host-startup-results.json'
 try {
     & $NodeExecutable (Join-Path $repo 'tests\test-host-startup.mjs')
     if ($LASTEXITCODE -ne 0) { throw 'Host readiness tests failed.' }
-    $hostResult = Assert-Result $env:INLINEGIF_HOST_TEST_REPORT 12
-    if ($hostResult.total -ne 12 -or @($hostResult.passed).Count -ne 12) { throw 'Host readiness test report does not contain all 12 checks.' }
+    $hostResult = Assert-Result $env:INLINEGIF_HOST_TEST_REPORT 13
+    if ($hostResult.total -ne 13 -or @($hostResult.passed).Count -ne 13) { throw 'Host readiness test report does not contain all 13 checks.' }
 } finally {
     if ($null -ne $priorHostReport) { $env:INLINEGIF_HOST_TEST_REPORT = $priorHostReport }
     else { Remove-Item Env:INLINEGIF_HOST_TEST_REPORT -ErrorAction SilentlyContinue }

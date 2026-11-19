@@ -1,7 +1,7 @@
 {
-  "kakaoTalkVersion": "26.9.2.5342",
+  "kakaoTalkVersion": "26.10.0.5364",
   "kakaoTalkArchitecture": "ia32",
-  "kakaoTalkExeSha256": "ec0f43b67cc7e81544464f649a5dfbd690776968014d34d7c554b7a9382a2290",
+  "kakaoTalkExeSha256": "1ab869f1735ddb948fd43dbc4d128be7f7509deb9bea1b4daf3f56cb942a52e2",
   "hostArchitecture": "x64",
   "nodeVersion": "24.22.2",
   "nodeExeSha256": "1c331340fa6cac5e4294725959070a143fa0507195a78ad77eed7943f719aac9",

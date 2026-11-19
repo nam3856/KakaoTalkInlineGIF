@@ -1,4 +1,4 @@
-/* Verified KakaoTalk26.9.2.5342 ia32 adapter. Constructing it verifies bytes; it does not call Kakao. */
+/* Verified KakaoTalk26.10.0.5364 ia32 adapter. Constructing it verifies bytes; it does not call Kakao. */
 'use strict';
 
 function createSourceResolverNativeAbi(context) {
@@ -9,14 +9,14 @@ function createSourceResolverNativeAbi(context) {
   if (size !== 4) throw new Error('Source resolver supports only the verified ia32 build');
   const zero = pointer(0);
   const add = value => base.add(value - 0x400000);
-  const types = { original: add(0x25b419c), control: add(0x25a4570), gdip: add(0x26242c4), webp: add(0x2623fd0) };
+  const types = { original: add(0x25c65f4), control: add(0x25b636c), gdip: add(0x26368ec), webp: add(0x26365f8) };
   const plans = {
-    factory: [0x143c050, '558bec6aff6887cb1c0264a100000000', 'pointer', ['pointer', 'pointer'], 'fastcall'],
-    sharedRelease: [0x8c1b60, '53578bda8bf93bfb7436560f1f440000', 'void', ['pointer', 'pointer'], 'fastcall'],
-    getImage: [0x12b13d0, '558bec6aff6854f7220264a100000000', 'pointer', ['pointer', 'pointer'], 'thiscall'],
-    download: [0x12b19a0, '558bec6aff6817f8220264a100000000', 'int', ['pointer'], 'thiscall'],
-    imageRelease: [0x176fa50, '558bec56578b7d0883cefff00fc17704', 'uint', ['pointer'], 'stdcall'],
-    vectorRelease: [0x8e2790, '568bf18b0e85c974578b560451e8bef3', 'void', ['pointer'], 'thiscall']
+    factory: [0x1442940, '558bec6aff6897d81d0264a100000000', 'pointer', ['pointer', 'pointer'], 'fastcall'],
+    sharedRelease: [0x8bfc90, '53578bda8bf93bfb7436560f1f440000', 'void', ['pointer', 'pointer'], 'fastcall'],
+    getImage: [0x12b8260, '558bec6aff6874f8230264a100000000', 'pointer', ['pointer', 'pointer'], 'thiscall'],
+    download: [0x12b8830, '558bec6aff6837f9230264a100000000', 'int', ['pointer'], 'thiscall'],
+    imageRelease: [0x1777a90, '558bec56578b7d0883cefff00fc17704', 'uint', ['pointer'], 'stdcall'],
+    vectorRelease: [0x8e0950, '568bf18b0e85c974578b560451e82ef3', 'void', ['pointer'], 'thiscall']
   };
   function guard(address, hex) {
     if (context.verifyEntry) { context.verifyEntry(address, hex); return; }
@@ -35,8 +35,8 @@ function createSourceResolverNativeAbi(context) {
   }
   let metadataShim = null, getMetadata = null;
   if (context.enableMetadata !== false) {
-    const getter = add(0x1a008b0);
-    guard(getter, '558bec6aff68e05e2c0264a100000000');
+    const getter = add(0x1a12780);
+    guard(getter, '558bec6aff68f0652d0264a100000000');
     const allocator = context.memory || Memory;
     const pageSize = context.pageSize || Process.pageSize;
     metadataShim = allocator.alloc(pageSize); // A dedicated page, never a shared small-allocation page.
@@ -66,7 +66,7 @@ function createSourceResolverNativeAbi(context) {
     },
     download(object) {
       original(object);
-      if (!object.readPointer().add(8).readPointer().equals(add(0x12b19a0))) throw new Error('Original download virtual-slot guard failed');
+      if (!object.readPointer().add(8).readPointer().equals(add(0x12b8830))) throw new Error('Original download virtual-slot guard failed');
       return calls.download(object);
     },
     releaseShared(output) {
@@ -86,7 +86,7 @@ function createSourceResolverNativeAbi(context) {
       const tag = output.add(4).readU8();
       const type = tag === 0 ? types.gdip : (tag === 1 ? types.webp : null);
       if (!type || !hasType(image, type)) throw new Error('Image-variant cleanup type guard failed');
-      if (!image.readPointer().add(8).readPointer().equals(add(0x176fa50))) throw new Error('Image Release virtual-slot guard failed');
+      if (!image.readPointer().add(8).readPointer().equals(add(0x1777a90))) throw new Error('Image Release virtual-slot guard failed');
       calls.imageRelease(image);
       output.writePointer(zero);
       output.add(4).writeU8(0xff);
